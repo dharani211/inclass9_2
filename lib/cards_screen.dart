@@ -10,7 +10,7 @@ class CardsScreen extends StatefulWidget {
 }
 
 class _CardsScreenState extends State<CardsScreen> {
-  late List<CardModel> cards;
+  late List<CardModel> cards = [];
 
   @override
   void initState() {
@@ -26,18 +26,60 @@ class _CardsScreenState extends State<CardsScreen> {
     });
   }
 
-  void _addCard() async {
-    CardModel newCard = CardModel(
-      id: 0,
-      name: 'New Card',
-      suit: widget.folderName,
-      imageUrl: 'assets/hearts.png', // Replace with actual image
-      folderId:
-          await DatabaseHelper.instance.getFolderIdByName(widget.folderName),
-    );
+  // Dynamically select the image based on the suit
+  String _getCardImage(String suit) {
+    switch (suit) {
+      case 'Hearts':
+        return 'assets/hearts.png';
+      case 'Spades':
+        return 'assets/spades.png';
+      case 'Diamonds':
+        return 'assets/diamonds.png';
+      case 'Clubs':
+        return 'assets/club.jpg';
+      default:
+        return 'assets/hearts.png';
+    }
+  }
 
-    await DatabaseHelper.instance.insertCard(newCard);
-    _loadCards(); // Reload the cards
+  Future<void> _addCard() async {
+    final folderId =
+        await DatabaseHelper.instance.getFolderIdByName(widget.folderName);
+    final cardCount =
+        await DatabaseHelper.instance.getCardCountByFolder(folderId);
+
+    if (cardCount >= 6) {
+      _showErrorDialog("This folder can only hold 6 cards.");
+    } else {
+      CardModel newCard = CardModel(
+        name: 'New Card',
+        suit: widget.folderName,
+        imageUrl: _getCardImage(
+            widget.folderName), // Dynamically set the image based on the suit
+        folderId: folderId,
+      );
+
+      await DatabaseHelper.instance.insertCard(newCard);
+      _loadCards(); // Reload the cards
+    }
+  }
+
+  void _showErrorDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Error"),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("OK"),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _updateCard(CardModel card) async {
@@ -75,19 +117,41 @@ class _CardsScreenState extends State<CardsScreen> {
           final card = cards[index];
           return Card(
             child: Column(
+              mainAxisSize:
+                  MainAxisSize.min, // Ensure the column minimizes its height
               children: [
-                Image.asset(card.imageUrl, width: 80, height: 80),
-                Text(card.name),
+                // Image with proper constraints to avoid overflow
+                Container(
+                  width: 80,
+                  height: 80,
+                  child: Image.asset(card.imageUrl, fit: BoxFit.contain),
+                ),
+
+                // Text with Flexible widget to avoid overflow
+                Flexible(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Text(
+                      card.name,
+                      overflow: TextOverflow
+                          .ellipsis, // Truncate text if it's too long
+                    ),
+                  ),
+                ),
+
+                // Buttons row with proper space management
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.edit),
+                      icon: const Icon(Icons.edit,
+                          size: 20), // Reduce button size if needed
                       onPressed: () => _updateCard(card),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.delete),
-                      onPressed: () => _deleteCard(card.id),
+                      icon: const Icon(Icons.delete,
+                          size: 20), // Reduce button size if needed
+                      onPressed: () => _deleteCard(card.id!),
                     ),
                   ],
                 ),

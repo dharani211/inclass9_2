@@ -26,14 +26,14 @@ class FolderModel {
 }
 
 class CardModel {
-  final int id;
+  final int? id;
   final String name;
   final String suit;
   final String imageUrl;
   final int folderId;
 
   CardModel({
-    required this.id,
+    this.id,
     required this.name,
     required this.suit,
     required this.imageUrl,
@@ -92,7 +92,7 @@ class DatabaseHelper {
 
     await db.execute('''
       CREATE TABLE $tableCards (
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         suit TEXT NOT NULL,
         imageUrl TEXT NOT NULL,
@@ -124,6 +124,14 @@ class DatabaseHelper {
     return result.first['id'] as int;
   }
 
+  Future<int> getCardCountByFolder(int folderId) async {
+    final result = await _database!.rawQuery(
+      'SELECT COUNT(*) FROM $tableCards WHERE folderId = ?',
+      [folderId],
+    );
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
   // Card CRUD operations
   Future<List<CardModel>> getCardsByFolder(String folderName) async {
     final folderId = await getFolderIdByName(folderName);
@@ -136,7 +144,9 @@ class DatabaseHelper {
   }
 
   Future<int> insertCard(CardModel card) async {
-    return await _database!.insert(tableCards, card.toJson());
+    final cardMap = card.toJson();
+    cardMap.remove('id'); // Remove the ID field so SQLite can auto-generate it
+    return await _database!.insert(tableCards, cardMap);
   }
 
   Future<int> updateCard(CardModel card) async {
