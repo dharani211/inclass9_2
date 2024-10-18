@@ -1,168 +1,282 @@
 import 'package:flutter/material.dart';
 import 'database_helper.dart';
+import 'card.dart'; // Your card model
 
-class CardsScreen extends StatefulWidget {
+class CardScreen extends StatefulWidget {
+  final int folderId;
   final String folderName;
-  const CardsScreen({super.key, required this.folderName});
+
+  CardScreen({required this.folderId, required this.folderName});
 
   @override
-  _CardsScreenState createState() => _CardsScreenState();
+  _CardScreenState createState() => _CardScreenState();
 }
 
-class _CardsScreenState extends State<CardsScreen> {
-  late List<CardModel> cards = [];
+class _CardScreenState extends State<CardScreen> {
+  late DatabaseHelper dbHelper;
+  late Future<List<CardModel>> cards;
 
   @override
   void initState() {
     super.initState();
-    _loadCards();
+    dbHelper = DatabaseHelper();
+    cards = _fetchCards();
   }
 
-  void _loadCards() async {
-    final loadedCards =
-        await DatabaseHelper.instance.getCardsByFolder(widget.folderName);
-    setState(() {
-      cards = loadedCards;
-    });
-  }
-
-  // Dynamically select the image based on the suit
-  String _getCardImage(String suit) {
-    switch (suit) {
-      case 'Hearts':
-        return 'assets/hearts.png';
-      case 'Spades':
-        return 'assets/spades.png';
-      case 'Diamonds':
-        return 'assets/diamonds.png';
-      case 'Clubs':
-        return 'assets/club.jpg';
-      default:
-        return 'assets/hearts.png';
-    }
+  Future<List<CardModel>> _fetchCards() async {
+    List<Map<String, dynamic>> cardMaps =
+        await dbHelper.getCards(widget.folderId);
+    return cardMaps.map((cardMap) => CardModel.fromMap(cardMap)).toList();
   }
 
   Future<void> _addCard() async {
-    final folderId =
-        await DatabaseHelper.instance.getFolderIdByName(widget.folderName);
-    final cardCount =
-        await DatabaseHelper.instance.getCardCountByFolder(folderId);
+    List<CardModel> existingCards = await _fetchCards();
 
-    if (cardCount >= 6) {
-      _showErrorDialog("This folder can only hold 6 cards.");
-    } else {
-      CardModel newCard = CardModel(
-        name: 'New Card',
-        suit: widget.folderName,
-        imageUrl: _getCardImage(
-            widget.folderName), // Dynamically set the image based on the suit
-        folderId: folderId,
-      );
-
-      await DatabaseHelper.instance.insertCard(newCard);
-      _loadCards(); // Reload the cards
+    if (existingCards.length >= 6) {
+      // Show error if limit is reached
+      _showErrorDialog('This folder can only hold 6 cards.');
+      return;
     }
+
+    // Show a dialog to ask for the card type and shape to be added
+    _showCardSelectionDialog();
   }
 
-  void _showErrorDialog(String message) {
-    showDialog(
+  // Show dialog to select the card type and shape
+  Future<void> _showCardSelectionDialog() async {
+    String? selectedCardType;
+    String? selectedCardShape;
+
+    await showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text("Error"),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("OK"),
-            ),
-          ],
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          // Use StatefulBuilder to handle dropdown state changes
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text('Select Card Type and Shape'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButton<String>(
+                    isExpanded: true,
+                    hint: Text('Select card type'),
+                    value: selectedCardType,
+                    items: [
+                      DropdownMenuItem(child: Text('Ace'), value: 'A'),
+                      DropdownMenuItem(child: Text('2'), value: '2'),
+                      DropdownMenuItem(child: Text('3'), value: '3'),
+                      DropdownMenuItem(child: Text('4'), value: '4'),
+                      DropdownMenuItem(child: Text('5'), value: '5'),
+                      DropdownMenuItem(child: Text('6'), value: '6'),
+                      DropdownMenuItem(child: Text('7'), value: '7'),
+                      DropdownMenuItem(child: Text('8'), value: '8'),
+                      DropdownMenuItem(child: Text('9'), value: '9'),
+                      DropdownMenuItem(child: Text('10'), value: '10'),
+                      DropdownMenuItem(child: Text('Jack'), value: 'J'),
+                      DropdownMenuItem(child: Text('Queen'), value: 'Q'),
+                      DropdownMenuItem(child: Text('King'), value: 'K'),
+                    ],
+                    onChanged: (String? newValue) {
+                      setState(() {
+                        selectedCardType =
+                            newValue; // Update the selected value
+                      });
+                    },
+                  ),
+                  DropdownButton<String>(
+                    isExpanded: true,
+                    hint: Text('Select card shape'),
+                    value: selectedCardShape,
+                    items: [
+                      DropdownMenuItem(child: Text('Hearts'), value: 'Hearts'),
+                      DropdownMenuItem(
+                          child: Text('Diamonds'), value: 'Diamonds'),
+                      DropdownMenuItem(child: Text('Spades'), value: 'Spades'),
+                      DropdownMenuItem(child: Text('Clubs'), value: 'Clubs'),
+                    ],
+                    onChanged: (String? newValue) {
+                      setState(() {
+                        selectedCardShape =
+                            newValue; // Update the selected value
+                      });
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  child: Text('Cancel'),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+                TextButton(
+                  child: Text('Add'),
+                  onPressed: () {
+                    if (selectedCardType != null && selectedCardShape != null) {
+                      _addSelectedCard(selectedCardType!, selectedCardShape!);
+                      Navigator.of(context).pop();
+                    } else {
+                      _showErrorDialog(
+                          'Please select both card type and shape.');
+                    }
+                  },
+                ),
+              ],
+            );
+          },
         );
       },
     );
   }
 
-  void _updateCard(CardModel card) async {
-    CardModel updatedCard = CardModel(
-      id: card.id,
-      name: 'Updated Card',
-      suit: card.suit,
-      imageUrl: card.imageUrl,
-      folderId: card.folderId,
+  // Add the selected card to the folder
+  Future<void> _addSelectedCard(String cardType, String cardShape) async {
+    String cardName;
+    String imageUrl;
+
+    // Construct the card name (e.g., "Ace of Hearts")
+    switch (cardType) {
+      case 'A':
+        cardName = 'Ace of $cardShape';
+        break;
+      case 'J':
+        cardName = 'Jack of $cardShape';
+        break;
+      case 'Q':
+        cardName = 'Queen of $cardShape';
+        break;
+      case 'K':
+        cardName = 'King of $cardShape';
+        break;
+      default:
+        cardName = '$cardType of $cardShape';
+    }
+
+    imageUrl = _getCardImageUrl(cardType, cardShape);
+
+    CardModel newCard = CardModel(
+      name: cardName,
+      suit: cardShape, // The selected shape becomes the suit
+      imageUrl: imageUrl,
+      folderId: widget.folderId,
     );
 
-    await DatabaseHelper.instance.updateCard(updatedCard);
-    _loadCards(); // Reload the cards after update
+    await dbHelper.addCard(newCard.toMap());
+    setState(() {
+      cards = _fetchCards();
+    });
+
+    // Notify FolderScreen of the changes and return true
+    Navigator.pop(
+        context, true); // This ensures the card count updates in FolderScreen
   }
 
-  void _deleteCard(int cardId) async {
-    await DatabaseHelper.instance.deleteCard(cardId);
-    _loadCards(); // Reload the cards after deletion
+  // Function to get the correct image URL based on the card number/type and shape
+  String _getCardImageUrl(String cardIdentifier, String suit) {
+    String suitLetter;
+    switch (suit) {
+      case 'Hearts':
+        suitLetter = 'H';
+        break;
+      case 'Diamonds':
+        suitLetter = 'D';
+        break;
+      case 'Spades':
+        suitLetter = 'S';
+        break;
+      case 'Clubs':
+        suitLetter = 'C';
+        break;
+      default:
+        suitLetter = 'H'; // Default to Hearts if something goes wrong
+    }
+
+    return 'https://deckofcardsapi.com/static/img/$cardIdentifier$suitLetter.png'; // Generate image URL
+  }
+
+  void _showErrorDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Error'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteCard(int cardId) async {
+    await dbHelper.deleteCard(cardId);
+    setState(() {
+      cards = _fetchCards();
+    });
+
+    // Notify FolderScreen of changes
+    Navigator.pop(context, true); // Return true to indicate a change was made
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('${widget.folderName} - Cards'),
+        title: Text('${widget.folderName} Cards'),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.add),
+            onPressed: _addCard, // Add new card after selecting type and shape
+          ),
+        ],
       ),
-      body: GridView.builder(
-        itemCount: cards.length,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 10,
-        ),
-        itemBuilder: (context, index) {
-          final card = cards[index];
-          return Card(
-            child: Column(
-              mainAxisSize:
-                  MainAxisSize.min, // Ensure the column minimizes its height
-              children: [
-                // Image with proper constraints to avoid overflow
-                Container(
-                  width: 80,
-                  height: 80,
-                  child: Image.asset(card.imageUrl, fit: BoxFit.contain),
-                ),
+      body: FutureBuilder<List<CardModel>>(
+        future: cards,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(child: CircularProgressIndicator());
+          } else if (snapshot.hasError) {
+            return Center(child: Text('Error loading cards'));
+          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return Center(child: Text('No cards in this folder.'));
+          }
 
-                // Text with Flexible widget to avoid overflow
-                Flexible(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: Text(
-                      card.name,
-                      overflow: TextOverflow
-                          .ellipsis, // Truncate text if it's too long
-                    ),
-                  ),
-                ),
-
-                // Buttons row with proper space management
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          return GridView.builder(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+            ),
+            itemCount: snapshot.data!.length,
+            itemBuilder: (context, index) {
+              final card = snapshot.data![index];
+              return Card(
+                elevation: 4,
+                child: Stack(
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit,
-                          size: 20), // Reduce button size if needed
-                      onPressed: () => _updateCard(card),
+                    Column(
+                      children: [
+                        Image.network(card.imageUrl,
+                            height: 100, fit: BoxFit.cover),
+                        Text(card.name),
+                        Text(card.suit),
+                      ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete,
-                          size: 20), // Reduce button size if needed
-                      onPressed: () => _deleteCard(card.id!),
+                    Positioned(
+                      right: 0,
+                      child: IconButton(
+                        icon: Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => _deleteCard(card.id!),
+                      ),
                     ),
                   ],
                 ),
-              ],
-            ),
+              );
+            },
           );
         },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addCard,
-        child: const Icon(Icons.add),
       ),
     );
   }
